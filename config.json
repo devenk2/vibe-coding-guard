@@ -1,0 +1,46 @@
+{
+  "version": "1.1.0",
+  "blocking_severity": "MEDIUM",
+  "enabled_rule_groups": ["PW", "RV", "PS"],
+  "analysis_mode": "hybrid",
+  "analysis_mode_options": {
+    "fast": "Regex-only scanning — fastest, lowest cost, deterministic",
+    "deep": "LLM-only analysis — slower, full reasoning, best coverage",
+    "hybrid": "Regex first, then LLM for ambiguous/complex cases (recommended)"
+  },
+  "llm_analysis": {
+    "enabled": true,
+    "analyze_on_regex_match": true,
+    "analyze_complex_patterns": true,
+    "max_context_lines": 50,
+    "timeout_seconds": 30
+  },
+  "file_extensions": {
+    "python": [".py"],
+    "javascript": [".js", ".jsx", ".ts", ".tsx", ".mjs", ".cjs"]
+  },
+  "ignore_paths": [
+    "node_modules",
+    ".venv",
+    "venv",
+    "__pycache__",
+    ".git",
+    "dist",
+    "build",
+    ".next",
+    ".nuxt"
+  ],
+  "max_file_size_kb": 500,
+  "dependency_scanning": {
+    "enabled": true,
+    "typosquatting_detection": true,
+    "osv_vulnerability_check": true,
+    "osv_api_timeout_seconds": 5,
+    "post_install_audit": true,
+    "post_install_audit_options": {
+      "pip_audit": "Runs pip-audit after pip install (requires: pip install pip-audit)",
+      "npm_audit": "Runs npm audit after npm install (built into npm)"
+    }
+  },
+  "custom_secret_patterns": []
+}

@@ -1,0 +1,9 @@
+{
+  "_comment": "Project-specific Vibe Coding Guard settings. Values here override global config (~/.vibe-coding-guard/config.json)",
+  "analysis_mode": "hybrid",
+  "analysis_mode_options": {
+    "fast": "Regex-only — fastest, deterministic, no LLM calls",
+    "deep": "Always use LLM reasoning — best coverage, slower",
+    "hybrid": "Regex first, LLM for ambiguous cases (recommended)"
+  }
+}
