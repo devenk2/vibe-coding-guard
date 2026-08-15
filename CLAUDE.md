@@ -18,6 +18,12 @@ This project supports three analysis modes (configured in `config.json` or `.cla
 - **In `hybrid` mode**: You may see a "Contextual Analysis Request" after regex findings. When you do, you MUST perform deeper analysis (see below).
 - **In `deep` mode**: You will always receive a contextual analysis request for every file write/edit, even if no regex issues were found. Analyze thoroughly.
 
+## LLM / AI-Backend App Scanning (opt-in)
+
+If this project's application code **calls an LLM** (OpenAI, Anthropic, LangChain, Ollama, Bedrock, etc.), enable the OWASP-LLM-Top-10 checks by setting `llm_app_scanning.enabled` to `true` in `config.json` or `.claude/vibe-coding-guard.json`. It is **off by default** because these checks are noise for non-LLM projects.
+
+When enabled, Python and JS/TS writes are additionally scanned for developer-accident LLM risks: prompt injection (untrusted input built into prompts), improper output handling (LLM output flowing into eval/shell/SQL/HTML), excessive agency (agents with shell/code tools), secrets/PII in prompt content, system-prompt exposure, and missing token/timeout limits. See `.claude/rules/llm-security.md` for the detailed practices.
+
 ## What This Means For You
 
 - **File writes/edits** are scanned for security anti-patterns (injection, hardcoded secrets, weak crypto, XSS, etc.)

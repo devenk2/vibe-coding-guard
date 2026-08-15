@@ -45,12 +45,32 @@ else
 fi
 echo ""
 
+# Run Heuristics tests
+echo -e "${BLUE}Running Heuristics tests...${NC}"
+if bash "$SCRIPT_DIR/test-heuristics.sh"; then
+  echo -e "${GREEN}Heuristics tests passed${NC}"
+else
+  echo -e "${RED}Heuristics tests had failures${NC}"
+  TOTAL_FAIL=$((TOTAL_FAIL + 1))
+fi
+echo ""
+
 # Run Dependency Scanning tests
 echo -e "${BLUE}Running Dependency Scanning tests...${NC}"
 if bash "$SCRIPT_DIR/test-dep-scanning.sh"; then
   echo -e "${GREEN}Dependency Scanning tests passed${NC}"
 else
   echo -e "${RED}Dependency Scanning tests had failures${NC}"
+  TOTAL_FAIL=$((TOTAL_FAIL + 1))
+fi
+echo ""
+
+# Run LLM-application scanner tests
+echo -e "${BLUE}Running LLM Scanner tests...${NC}"
+if bash "$SCRIPT_DIR/test-llm-scan.sh"; then
+  echo -e "${GREEN}LLM Scanner tests passed${NC}"
+else
+  echo -e "${RED}LLM Scanner tests had failures${NC}"
   TOTAL_FAIL=$((TOTAL_FAIL + 1))
 fi
 

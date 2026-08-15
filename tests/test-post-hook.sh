@@ -10,8 +10,11 @@ TEST_VCG_HOME=$(mktemp -d)
 cp -r "$PROJECT_DIR/lib" "$TEST_VCG_HOME/"
 cp -r "$PROJECT_DIR/hooks" "$TEST_VCG_HOME/"
 
-# Create config with fast mode for deterministic testing
-cat "$PROJECT_DIR/config.json" | jq '.analysis_mode = "fast"' > "$TEST_VCG_HOME/config.json"
+# Create config with fast mode for deterministic testing.
+# Also disable test-file skipping: these fixtures deliberately live under
+# tests/fixtures/, and this suite exists to exercise the scanners on them.
+# (test-file skip behavior itself is covered by test-heuristics.sh.)
+cat "$PROJECT_DIR/config.json" | jq '.analysis_mode = "fast" | .test_scanning.skip_tests = false' > "$TEST_VCG_HOME/config.json"
 
 # Update VCG_HOME placeholder in test copies
 for f in "$TEST_VCG_HOME/hooks/"*.sh "$TEST_VCG_HOME/lib/"*.sh; do
@@ -153,6 +156,12 @@ test_file_scan_with_count "JS missing-logging has findings" "$FIXTURES/missing-l
 echo ""
 echo "--- Safe Python file (should pass, exit=0) ---"
 test_file_scan "Safe Python file passes cleanly" "$FIXTURES/safe-example.py" 0
+
+echo ""
+echo "--- Markdown docs: secrets-only scanning ---"
+test_file_scan "Markdown with a real secret still triggers (exit=2)" "$FIXTURES/doc-with-secret.md" 2
+test_file_scan_with_count "Markdown secret produces a finding" "$FIXTURES/doc-with-secret.md" 1
+test_file_scan "Markdown with only code-flow noise passes (exit=0)" "$FIXTURES/doc-with-noise.md" 0
 
 echo ""
 echo "--- Edge cases ---"

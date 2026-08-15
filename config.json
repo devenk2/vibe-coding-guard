@@ -19,6 +19,25 @@
     "python": [".py"],
     "javascript": [".js", ".jsx", ".ts", ".tsx", ".mjs", ".cjs"]
   },
+  "doc_scanning": {
+    "secrets_only": true,
+    "doc_extensions": [".md", ".markdown", ".mdx", ".rst", ".txt"],
+    "_comment": "Documentation/text files are scanned for hardcoded secrets only. Code-flow vuln patterns (SSRF, path traversal, injection) are noise in non-executable docs, but a real credential in a README is still a real leak. Set secrets_only=false to scan docs like code."
+  },
+  "test_scanning": {
+    "skip_tests": true,
+    "test_patterns": ["test_*", "*_test.*", "*.test.*", "*.spec.*", "*_spec.*", "/tests/", "/test/", "/__tests__/", "/spec/"],
+    "_comment": "Test files are skipped entirely. Test fixtures are dominated by fake sentinels, dummy credentials, and negative-test URLs that produce almost only false positives. Patterns ending in / match a path segment; others are basename globs. Set skip_tests=false to scan tests like production code."
+  },
+  "llm_app_scanning": {
+    "enabled": false,
+    "_comment": "Opt-in. Set enabled=true if this project's application code CALLS an LLM (OpenAI/Anthropic/LangChain/Ollama/Bedrock/etc.). Adds OWASP-LLM-Top-10 checks for developer-accident classes: prompt injection (untrusted input into prompts), unsafe handling of LLM output (output into eval/shell/SQL/innerHTML), excessive agency (agents with shell/code tools), secrets-in-prompt, system-prompt exposure, and missing token/timeout limits. Off by default because these checks only make sense for LLM-backed apps and would be noise elsewhere."
+  },
+  "security_relevant": {
+    "always_analyze": true,
+    "patterns": ["config", "settings", "secret", "credential", "auth", "crypto", "logging", "security", "middleware", "password"],
+    "_comment": "In hybrid mode, files whose name/path contains any of these substrings ALWAYS get contextual analysis, regardless of the request->sink token heuristic. Fixes inverted coverage: secret-handling modules (config, logging) rarely look like request handlers, so the token heuristic misses exactly the files that matter most."
+  },
   "ignore_paths": [
     "node_modules",
     ".venv",

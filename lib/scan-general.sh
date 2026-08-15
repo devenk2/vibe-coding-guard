@@ -2,9 +2,13 @@
 # Vibe Coding Guard — General Security Scanner
 # Language-agnostic security patterns (secrets, crypto, transport)
 
-# Scan any file for general security issues
+# Scan a file for hardcoded secrets / credentials only.
+# This is the subset of checks that stays meaningful even in non-executable
+# files (docs, markdown, text): a real key committed to a README is still a
+# real, exploitable leak. Code-flow checks (path traversal, transport) are
+# NOT included here — see scan_general_file for those.
 # Outputs JSON findings (one per line) to stdout
-scan_general_file() {
+scan_secrets_file() {
   local file="$1"
 
   # === HIGH SEVERITY ===
@@ -93,6 +97,9 @@ scan_general_file() {
       "Use environment variables for SendGrid keys. Rotate any exposed keys immediately"
   done < <(grep -nE 'SG\.[a-zA-Z0-9_-]{22}\.[a-zA-Z0-9_-]{43}' "$file" 2>/dev/null || true)
 
+  # NOTE: path-traversal and insecure-transport checks intentionally live in
+  # scan_general_file, not here — they are code-flow signals, not secrets.
+
   # Generic hardcoded password/secret across all languages
   while IFS=: read -r line_num matched_line; do
     # Skip lines that look like config templates, examples, or environment variable reads
@@ -104,26 +111,6 @@ scan_general_file() {
       "Potential hardcoded password or secret found in source code" \
       "Use environment variables or a secrets manager instead of hardcoding credentials"
   done < <(grep -nEi '(password|passwd|secret|api_key|apikey|auth_token|private_key)\s*[:=]\s*["\x27][^"\x27]{8,}' "$file" 2>/dev/null || true)
-
-  # === MEDIUM SEVERITY ===
-
-  # Path traversal patterns (single or multiple levels)
-  while IFS=: read -r line_num _; do
-    emit_finding "MEDIUM" "PW.5" "PW" "path-traversal" \
-      "$file" "$line_num" "../" \
-      "Path traversal pattern detected — could allow access to files outside intended directory" \
-      "Use path canonicalization and validate that resolved paths stay within allowed directories"
-  done < <(grep -nE '\.\./' "$file" 2>/dev/null | grep -vEi '(node_modules|vendor|go\.sum|package-lock|CHANGELOG|README)' || true)
-
-  # === LOW SEVERITY ===
-
-  # HTTP URLs (non-localhost)
-  while IFS=: read -r line_num _; do
-    emit_finding "LOW" "PW.9" "PW" "insecure-transport" \
-      "$file" "$line_num" "http://" \
-      "Unencrypted HTTP URL found — data transmitted in plain text" \
-      "Use HTTPS instead of HTTP for all external communication"
-  done < <(grep -nE 'http://' "$file" 2>/dev/null | grep -vEi '(localhost|127\.0\.0\.1|0\.0\.0\.0|example\.com|schema|xml|\.dtd|w3\.org)' || true)
 
   # Check custom secret patterns from config
   if [[ -n "${CUSTOM_SECRET_PATTERNS:-}" ]]; then
@@ -149,7 +136,15 @@ scan_general_file() {
   # .env files often contain secrets as KEY=value assignments
   local filename
   filename=$(basename "$file")
-  if [[ "$filename" == .env* || "$filename" == "*.env" ]]; then
+  # Template/example files (.env.example, config.sample, *.template, *.dist) are
+  # meant to hold placeholder values, so the naive KEY= heuristic is pure noise
+  # on them. High-confidence provider-format patterns above still run, so a real
+  # key mistakenly committed to a template is still caught.
+  local is_template="false"
+  if echo "$filename" | grep -qiE '\.(example|sample|template|dist)(\.|$)|\.example$|\.sample$|\.template$|\.dist$'; then
+    is_template="true"
+  fi
+  if [[ "$is_template" == "false" && ( "$filename" == .env* || "$filename" == "*.env" ) ]]; then
     while IFS=: read -r line_num matched_line; do
       # Skip comments and empty lines
       if echo "$matched_line" | grep -qE '^\s*(#|$)'; then
@@ -159,12 +154,54 @@ scan_general_file() {
       if echo "$matched_line" | grep -qEi '(example|placeholder|changeme|xxx|your_|<.*>|TODO)'; then
         continue
       fi
+      # Skip assignments with an empty / blank RHS (e.g. OPENAI_API_KEY= or KEY="")
+      # — an unset key is a template stub, not a leaked secret.
+      local rhs="${matched_line#*=}"
+      rhs="${rhs//[[:space:]]/}"
+      rhs="${rhs//\"/}"
+      rhs="${rhs//\'/}"
+      if [[ -z "$rhs" ]]; then
+        continue
+      fi
       emit_finding "HIGH" "RV.1" "RV" "env-file-secret" \
         "$file" "$line_num" ".env credential" \
         "Secret value found in .env file — .env files should never be committed to source control" \
         "Add .env to .gitignore. Use .env.example with placeholder values for documentation"
     done < <(grep -nEi '(password|passwd|secret|api_key|apikey|token|auth_token|private_key|database_url|db_password|redis_url)\s*=' "$file" 2>/dev/null || true)
   fi
+
+  return 0
+}
+
+# Scan any file for general security issues.
+# Superset of scan_secrets_file: also runs code-flow checks (path traversal,
+# insecure transport) that only make sense for executable source, not docs.
+# Outputs JSON findings (one per line) to stdout
+scan_general_file() {
+  local file="$1"
+
+  # Secrets are relevant in every file type
+  scan_secrets_file "$file"
+
+  # === MEDIUM SEVERITY (code-flow) ===
+
+  # Path traversal patterns (single or multiple levels)
+  while IFS=: read -r line_num _; do
+    emit_finding "MEDIUM" "PW.5" "PW" "path-traversal" \
+      "$file" "$line_num" "../" \
+      "Path traversal pattern detected — could allow access to files outside intended directory" \
+      "Use path canonicalization and validate that resolved paths stay within allowed directories"
+  done < <(grep -nE '\.\./' "$file" 2>/dev/null | grep -vEi '(node_modules|vendor|go\.sum|package-lock|CHANGELOG|README)' || true)
+
+  # === LOW SEVERITY (code-flow) ===
+
+  # HTTP URLs (non-localhost)
+  while IFS=: read -r line_num _; do
+    emit_finding "LOW" "PW.9" "PW" "insecure-transport" \
+      "$file" "$line_num" "http://" \
+      "Unencrypted HTTP URL found — data transmitted in plain text" \
+      "Use HTTPS instead of HTTP for all external communication"
+  done < <(grep -nE 'http://' "$file" 2>/dev/null | grep -vEi '(localhost|127\.0\.0\.1|0\.0\.0\.0|example\.com|schema|xml|\.dtd|w3\.org)' || true)
 
   return 0
 }
