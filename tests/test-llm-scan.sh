@@ -117,6 +117,33 @@ PY
 [[ "$(count_cat "$WORK/nolimit.py" missing-llm-limits)" -ge 1 ]] \
   && ok "LLM10 missing-limits flagged" || bad "LLM10 missing-limits missed"
 
+# LLM10 — vcg-ignore comment on the call line suppresses the finding (limits
+# set via a wrapper/helper the windowed heuristic can't see).
+cat > "$WORK/nolimit_suppressed.py" <<'PY'
+import openai
+
+def ask():
+    return openai.chat.completions.create(  # vcg-ignore: missing-llm-limits
+        model="gpt-4",
+        messages=[{"role": "user", "content": "hello"}],
+    )
+PY
+[[ "$(count_cat "$WORK/nolimit_suppressed.py" missing-llm-limits)" -eq 0 ]] \
+  && ok "LLM10 missing-limits suppressed via vcg-ignore" || bad "LLM10 vcg-ignore suppression failed"
+
+# vcg-ignore with a different category does NOT suppress this finding.
+cat > "$WORK/nolimit_wrong_cat.py" <<'PY'
+import openai
+
+def ask():
+    return openai.chat.completions.create(  # vcg-ignore: prompt-injection
+        model="gpt-4",
+        messages=[{"role": "user", "content": "hello"}],
+    )
+PY
+[[ "$(count_cat "$WORK/nolimit_wrong_cat.py" missing-llm-limits)" -ge 1 ]] \
+  && ok "vcg-ignore with unrelated category leaves finding active" || bad "vcg-ignore wrongly suppressed an unrelated category"
+
 # SAFE — static prompt, sanitized output, client-config secret, token cap:
 # must produce ZERO findings (false-positive guard).
 cat > "$WORK/safe.py" <<'PY'

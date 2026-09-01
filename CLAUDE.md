@@ -35,7 +35,7 @@ When enabled, Python and JS/TS writes are additionally scanned for developer-acc
 If a hook returns a security finding (exit code 2), you MUST:
 1. Read the finding carefully
 2. Fix the identified issue in your next action
-3. Do NOT ignore or work around the security check
+3. Do NOT ignore or work around the security check by rewriting correct code just to dodge a pattern match. The one exception: if a finding is a confirmed false positive or too noisy to be actionable in context, suppress it with an inline `vcg-ignore` (bare, or scoped as `vcg-ignore: category-name`) comment on the flagged line or the line above it — that is the intended escape hatch, not a workaround, and does not require rewriting the code.
 
 ### When Contextual Analysis is Requested
 

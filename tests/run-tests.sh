@@ -73,6 +73,16 @@ else
   echo -e "${RED}LLM Scanner tests had failures${NC}"
   TOTAL_FAIL=$((TOTAL_FAIL + 1))
 fi
+echo ""
+
+# Run Auth & Access-Control scanner tests
+echo -e "${BLUE}Running Auth & Access-Control Scanner tests...${NC}"
+if bash "$SCRIPT_DIR/test-auth-scanning.sh"; then
+  echo -e "${GREEN}Auth & Access-Control Scanner tests passed${NC}"
+else
+  echo -e "${RED}Auth & Access-Control Scanner tests had failures${NC}"
+  TOTAL_FAIL=$((TOTAL_FAIL + 1))
+fi
 
 echo ""
 echo -e "${BLUE}============================================${NC}"

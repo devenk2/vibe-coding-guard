@@ -93,7 +93,7 @@ if [[ -f "$CLAUDE_MD" ]]; then
 fi
 
 # --- Remove rules files ---
-VCG_RULES=("pw-secure-coding.md" "rv-vulnerabilities.md" "ps-protect-software.md" "security-aware.md")
+VCG_RULES=("pw-secure-coding.md" "rv-vulnerabilities.md" "ps-protect-software.md" "security-aware.md" "api-security.md" "llm-security.md" "access-control.md")
 RULES_DIR="$TARGET_PROJECT/.claude/rules"
 
 if [[ -d "$RULES_DIR" ]]; then

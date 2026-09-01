@@ -60,6 +60,18 @@ load_config() {
   # Top-10 checks in scan-llm.sh run on Python/JS files. Off by default because
   # they only make sense for code that actually calls an LLM.
   LLM_APP_SCANNING="false"
+  # Auth/access-control scanning: "auto" (default) detects whether the project
+  # uses authentication via its dependency manifest and gates the
+  # access-control checks accordingly; "true"/"false" force the gate open/shut.
+  AUTH_SCANNING_MODE="auto"
+  AUTH_CHECK_MISSING_MIDDLEWARE="true"
+  AUTH_CHECK_IDOR="true"
+  AUTH_CHECK_ADMIN_ROLE="true"
+  AUTH_CHECK_WEAK_PW_HASH="true"
+  AUTH_CHECK_JWT_EXPIRATION="true"
+  AUTH_CHECK_SESSION_COOKIE="true"
+  AUTH_NPM_LIBRARIES=$'passport\nnext-auth\nauth0\n@okta/okta-sdk-nodejs\nfirebase-admin\njsonwebtoken\nexpress-session\ncookie-session\n@clerk/nextjs\n@clerk/clerk-sdk-node\nsupertokens-node\nkeycloak-connect\nopenid-client\noidc-client-ts'
+  AUTH_PYPI_LIBRARIES=$'django-allauth\ndjango-oauth-toolkit\nsocial-auth-app-django\nflask-login\nflask-jwt-extended\nflask-security\nflask-security-too\nauthlib\npython-jose\npyjwt\ndjangorestframework-simplejwt\nfastapi-users\nfastapi-login\nsupertokens-python\nauth0-python\npython-keycloak\nfirebase-admin'
   DEP_SCANNING_ENABLED="true"
   DEP_CHECK_TYPOSQUAT="true"
   DEP_CHECK_OSV="true"
@@ -101,6 +113,25 @@ load_config() {
     # Explicit null-check (default false) so a `false` value isn't coerced to the
     # default by jq's `//` operator (false // true → true).
     LLM_APP_SCANNING=$(jq -r 'if .llm_app_scanning.enabled == null then false else .llm_app_scanning.enabled end' "$global_config")
+    # auth_scanning.enabled accepts either the string enum ("auto"/"true"/
+    # "false") or a native JSON boolean (true/false) for convenience/parity
+    # with this file's other *.enabled keys. A JSON boolean false must be
+    # explicitly normalized to the string "false" here — jq's `//` treats
+    # `false` the same as null, so a plain `// "auto"` would silently coerce
+    # a real `false` back to the default (the same footgun documented above
+    # for LLM_APP_SCANNING etc.).
+    AUTH_SCANNING_MODE=$(jq -r '.auth_scanning.enabled | if . == null then "auto" elif type == "boolean" then (if . then "true" else "false" end) else . end' "$global_config")
+    AUTH_CHECK_MISSING_MIDDLEWARE=$(jq -r 'if .auth_scanning.checks.missing_auth_middleware == null then true else .auth_scanning.checks.missing_auth_middleware end' "$global_config")
+    AUTH_CHECK_IDOR=$(jq -r 'if .auth_scanning.checks.idor_heuristic == null then true else .auth_scanning.checks.idor_heuristic end' "$global_config")
+    AUTH_CHECK_ADMIN_ROLE=$(jq -r 'if .auth_scanning.checks.admin_role_check == null then true else .auth_scanning.checks.admin_role_check end' "$global_config")
+    AUTH_CHECK_WEAK_PW_HASH=$(jq -r 'if .auth_scanning.checks.weak_password_hashing == null then true else .auth_scanning.checks.weak_password_hashing end' "$global_config")
+    AUTH_CHECK_JWT_EXPIRATION=$(jq -r 'if .auth_scanning.checks.jwt_missing_expiration == null then true else .auth_scanning.checks.jwt_missing_expiration end' "$global_config")
+    AUTH_CHECK_SESSION_COOKIE=$(jq -r 'if .auth_scanning.checks.session_cookie_flags == null then true else .auth_scanning.checks.session_cookie_flags end' "$global_config")
+    local global_auth_npm global_auth_pypi
+    global_auth_npm=$(jq -r '.auth_scanning.libraries.npm[]' "$global_config" 2>/dev/null || echo "")
+    [[ -n "$global_auth_npm" ]] && AUTH_NPM_LIBRARIES="$global_auth_npm"
+    global_auth_pypi=$(jq -r '.auth_scanning.libraries.pypi[]' "$global_config" 2>/dev/null || echo "")
+    [[ -n "$global_auth_pypi" ]] && AUTH_PYPI_LIBRARIES="$global_auth_pypi"
     log_debug "Loaded global config from $global_config"
   else
     log_debug "Global config not found at $global_config, using defaults"
@@ -182,6 +213,38 @@ load_config() {
     val=$(jq -r 'if .llm_app_scanning.enabled == null then empty else .llm_app_scanning.enabled end' "$project_config")
     [[ -n "$val" ]] && LLM_APP_SCANNING="$val"
 
+    # Override auth-scanning settings (see the global-load comment above for
+    # why a native JSON boolean must be normalized rather than using `// empty`)
+    val=$(jq -r '.auth_scanning.enabled | if . == null then empty elif type == "boolean" then (if . then "true" else "false" end) else . end' "$project_config")
+    [[ -n "$val" ]] && AUTH_SCANNING_MODE="$val"
+
+    val=$(jq -r 'if .auth_scanning.checks.missing_auth_middleware == null then empty else .auth_scanning.checks.missing_auth_middleware end' "$project_config")
+    [[ -n "$val" ]] && AUTH_CHECK_MISSING_MIDDLEWARE="$val"
+
+    val=$(jq -r 'if .auth_scanning.checks.idor_heuristic == null then empty else .auth_scanning.checks.idor_heuristic end' "$project_config")
+    [[ -n "$val" ]] && AUTH_CHECK_IDOR="$val"
+
+    val=$(jq -r 'if .auth_scanning.checks.admin_role_check == null then empty else .auth_scanning.checks.admin_role_check end' "$project_config")
+    [[ -n "$val" ]] && AUTH_CHECK_ADMIN_ROLE="$val"
+
+    val=$(jq -r 'if .auth_scanning.checks.weak_password_hashing == null then empty else .auth_scanning.checks.weak_password_hashing end' "$project_config")
+    [[ -n "$val" ]] && AUTH_CHECK_WEAK_PW_HASH="$val"
+
+    val=$(jq -r 'if .auth_scanning.checks.jwt_missing_expiration == null then empty else .auth_scanning.checks.jwt_missing_expiration end' "$project_config")
+    [[ -n "$val" ]] && AUTH_CHECK_JWT_EXPIRATION="$val"
+
+    val=$(jq -r 'if .auth_scanning.checks.session_cookie_flags == null then empty else .auth_scanning.checks.session_cookie_flags end' "$project_config")
+    [[ -n "$val" ]] && AUTH_CHECK_SESSION_COOKIE="$val"
+
+    # Auth library lists are replaced wholesale when a project declares its own
+    # (matching doc_extensions/test_patterns replace-semantics), not merged —
+    # a project either extends the well-known list explicitly or fully owns it.
+    local project_auth_npm project_auth_pypi
+    project_auth_npm=$(jq -r '.auth_scanning.libraries.npm[]' "$project_config" 2>/dev/null || echo "")
+    [[ -n "$project_auth_npm" ]] && AUTH_NPM_LIBRARIES="$project_auth_npm"
+    project_auth_pypi=$(jq -r '.auth_scanning.libraries.pypi[]' "$project_config" 2>/dev/null || echo "")
+    [[ -n "$project_auth_pypi" ]] && AUTH_PYPI_LIBRARIES="$project_auth_pypi"
+
     # Merge ignore_paths (project adds to global)
     local project_ignores
     project_ignores=$(jq -r '.ignore_paths[]' "$project_config" 2>/dev/null || echo "")
@@ -200,6 +263,45 @@ load_config() {
   fi
 }
 
+# Check whether a finding is suppressed via an inline "vcg-ignore" marker on
+# the flagged line or the line immediately above it. Matching is a plain
+# substring search, so it works regardless of comment syntax (#, //, --, ...).
+# Bare "vcg-ignore" suppresses any finding on that line; "vcg-ignore: cat1,cat2"
+# only suppresses the listed categories, leaving other checks on the same line
+# active. Non-file targets (e.g. Bash command checks, which pass file="command")
+# are never suppressible this way.
+# Usage: _is_suppressed "$file" "$line" "$category"  → returns 0 if suppressed
+_is_suppressed() {
+  local file="$1"
+  local line="$2"
+  local category="$3"
+
+  [[ -f "$file" ]] || return 1
+  [[ "$line" =~ ^[0-9]+$ && "$line" -gt 0 ]] || return 1
+
+  local prev=$(( line > 1 ? line - 1 : 1 ))
+  local snippet
+  snippet=$(sed -n "${prev},${line}p" "$file" 2>/dev/null)
+  [[ -z "$snippet" ]] && return 1
+
+  local marker
+  marker=$(printf '%s' "$snippet" | grep -oEi 'vcg-ignore(:[[:space:]]*[a-zA-Z0-9_,-]+)?' | head -1)
+  [[ -z "$marker" ]] && return 1
+
+  # Bare marker (no ":category" list) suppresses any finding on the line.
+  [[ "$marker" != *:* ]] && return 0
+
+  # Category-scoped: only suppress if this finding's category is listed.
+  local cats="${marker#*:}"
+  cats="${cats// /}"
+  local IFS=','
+  local c
+  for c in $cats; do
+    [[ "$c" == "$category" ]] && return 0
+  done
+  return 1
+}
+
 # Emit a structured JSON finding to stdout (one per line)
 # Usage: emit_finding SEVERITY SSDF_PRACTICE SSDF_GROUP CATEGORY FILE LINE PATTERN DESCRIPTION REMEDIATION
 emit_finding() {
@@ -212,6 +314,11 @@ emit_finding() {
   local pattern_matched="$7"
   local description="$8"
   local remediation="$9"
+
+  if _is_suppressed "$file" "$line" "$category"; then
+    log_debug "Suppressed finding ($category) at $file:$line via vcg-ignore"
+    return 0
+  fi
 
   jq -n -c \
     --arg sev "$severity" \
@@ -300,6 +407,53 @@ is_security_relevant_file() {
       return 0
     fi
   done <<< "$SECURITY_RELEVANT_PATTERNS"
+  return 1
+}
+
+# Detect whether a project uses authentication, to gate access-control checks
+# (missing-auth-middleware, IDOR heuristic, admin-role check) so they stay
+# silent on projects that don't use/need auth (public APIs, internal tools).
+# "auto" mode is a bounded, single-file-read check of the project's dependency
+# manifest(s) against known auth-library names — NOT a project-wide tree walk
+# (no such mechanism exists elsewhere in this codebase, and isn't needed here).
+# Known limitation: only checks manifests at project_dir's root, so monorepos
+# with the manifest elsewhere won't be detected.
+# Usage: project_uses_auth "$project_dir"  → returns 0 if auth is in use/assumed
+project_uses_auth() {
+  local project_dir="${1:-.}"
+
+  case "${AUTH_SCANNING_MODE:-auto}" in
+    true)  return 0 ;;
+    false) return 1 ;;
+  esac
+
+  # auto: check npm manifest
+  local pkg_json="$project_dir/package.json"
+  if [[ -f "$pkg_json" ]]; then
+    local deps lib
+    deps=$(jq -r '((.dependencies // {}) + (.devDependencies // {})) | keys[]?' "$pkg_json" 2>/dev/null || echo "")
+    if [[ -n "$deps" ]]; then
+      while IFS= read -r lib; do
+        [[ -z "$lib" ]] && continue
+        printf '%s\n' "$deps" | grep -qxF "$lib" && return 0
+      done <<< "${AUTH_NPM_LIBRARIES:-}"
+    fi
+  fi
+
+  # auto: check Python manifests (best-effort substring match, not a full parser)
+  local mf
+  for mf in requirements.txt requirements-dev.txt Pipfile pyproject.toml setup.cfg; do
+    local manifest_path="$project_dir/$mf"
+    [[ -f "$manifest_path" ]] || continue
+    local lib
+    while IFS= read -r lib; do
+      [[ -z "$lib" ]] && continue
+      if grep -qiE "(^|[\"'[:space:]])${lib}([\"'[:space:]=<>!~,]|\$)" "$manifest_path" 2>/dev/null; then
+        return 0
+      fi
+    done <<< "${AUTH_PYPI_LIBRARIES:-}"
+  done
+
   return 1
 }
 

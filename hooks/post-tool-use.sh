@@ -11,6 +11,7 @@ source "$VCG_HOME/lib/scan-javascript.sh"
 source "$VCG_HOME/lib/scan-general.sh"
 source "$VCG_HOME/lib/scan-api-security.sh"
 source "$VCG_HOME/lib/scan-llm.sh"
+source "$VCG_HOME/lib/scan-auth.sh"
 source "$VCG_HOME/lib/scan-swift.sh"
 source "$VCG_HOME/lib/scan-gitignore.sh"
 source "$VCG_HOME/lib/scan-dependencies.sh"
@@ -95,6 +96,15 @@ fi
 FINDINGS_FILE=$(mktemp)
 trap "rm -f '$FINDINGS_FILE'" EXIT
 
+# Auto-detect (or honor manual override for) whether this project uses
+# authentication, gating the access-control checks in scan-api-security.sh
+# and scan-auth.sh. Computed once per invocation and passed down as a bool —
+# cheap (1-2 small manifest reads, no network call) so unconditional is fine.
+AUTH_PROJECT_DETECTED="false"
+if project_uses_auth "$PROJECT_DIR"; then
+  AUTH_PROJECT_DETECTED="true"
+fi
+
 # Determine file type and run appropriate scanners
 EXT=$(get_file_extension "$FILE_PATH")
 
@@ -113,14 +123,16 @@ case "$EXT" in
   .py)
     scan_python_file "$FILE_PATH" >> "$FINDINGS_FILE"
     scan_general_file "$FILE_PATH" >> "$FINDINGS_FILE"
-    scan_api_security_file "$FILE_PATH" >> "$FINDINGS_FILE"
+    scan_api_security_file "$FILE_PATH" "$AUTH_PROJECT_DETECTED" >> "$FINDINGS_FILE"
+    scan_auth_file "$FILE_PATH" "$AUTH_PROJECT_DETECTED" >> "$FINDINGS_FILE"
     # LLM-app checks are opt-in (llm_app_scanning.enabled) — inert otherwise.
     [[ "${LLM_APP_SCANNING:-false}" == "true" ]] && scan_llm_file "$FILE_PATH" >> "$FINDINGS_FILE"
     ;;
   .js|.jsx|.ts|.tsx|.mjs|.cjs)
     scan_js_file "$FILE_PATH" >> "$FINDINGS_FILE"
     scan_general_file "$FILE_PATH" >> "$FINDINGS_FILE"
-    scan_api_security_file "$FILE_PATH" >> "$FINDINGS_FILE"
+    scan_api_security_file "$FILE_PATH" "$AUTH_PROJECT_DETECTED" >> "$FINDINGS_FILE"
+    scan_auth_file "$FILE_PATH" "$AUTH_PROJECT_DETECTED" >> "$FINDINGS_FILE"
     # LLM-app checks are opt-in (llm_app_scanning.enabled) — inert otherwise.
     [[ "${LLM_APP_SCANNING:-false}" == "true" ]] && scan_llm_file "$FILE_PATH" >> "$FINDINGS_FILE"
     ;;
@@ -130,7 +142,7 @@ case "$EXT" in
     ;;
   *)
     scan_general_file "$FILE_PATH" >> "$FINDINGS_FILE"
-    scan_api_security_file "$FILE_PATH" >> "$FINDINGS_FILE"
+    scan_api_security_file "$FILE_PATH" "$AUTH_PROJECT_DETECTED" >> "$FINDINGS_FILE"
     ;;
 esac
 fi

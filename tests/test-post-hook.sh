@@ -14,7 +14,11 @@ cp -r "$PROJECT_DIR/hooks" "$TEST_VCG_HOME/"
 # Also disable test-file skipping: these fixtures deliberately live under
 # tests/fixtures/, and this suite exists to exercise the scanners on them.
 # (test-file skip behavior itself is covered by test-heuristics.sh.)
-cat "$PROJECT_DIR/config.json" | jq '.analysis_mode = "fast" | .test_scanning.skip_tests = false' > "$TEST_VCG_HOME/config.json"
+# auth_scanning.enabled is forced true so the missing-api-auth check (now
+# gated on project_uses_auth) keeps firing unconditionally here, since these
+# fixtures are meant to test "does the scanner detect X" in isolation, not
+# the auth-detection gate itself — that's covered by test-auth-scanning.sh.
+cat "$PROJECT_DIR/config.json" | jq '.analysis_mode = "fast" | .test_scanning.skip_tests = false | .auth_scanning.enabled = true' > "$TEST_VCG_HOME/config.json"
 
 # Update VCG_HOME placeholder in test copies
 for f in "$TEST_VCG_HOME/hooks/"*.sh "$TEST_VCG_HOME/lib/"*.sh; do

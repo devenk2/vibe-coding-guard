@@ -1,5 +1,5 @@
 {
-  "version": "1.1.0",
+  "version": "1.2.0",
   "blocking_severity": "MEDIUM",
   "enabled_rule_groups": ["PW", "RV", "PS"],
   "analysis_mode": "hybrid",
@@ -32,6 +32,22 @@
   "llm_app_scanning": {
     "enabled": false,
     "_comment": "Opt-in. Set enabled=true if this project's application code CALLS an LLM (OpenAI/Anthropic/LangChain/Ollama/Bedrock/etc.). Adds OWASP-LLM-Top-10 checks for developer-accident classes: prompt injection (untrusted input into prompts), unsafe handling of LLM output (output into eval/shell/SQL/innerHTML), excessive agency (agents with shell/code tools), secrets-in-prompt, system-prompt exposure, and missing token/timeout limits. Off by default because these checks only make sense for LLM-backed apps and would be noise elsewhere."
+  },
+  "auth_scanning": {
+    "enabled": "auto",
+    "_comment": "'auto' (default) detects whether this project uses authentication by checking package.json/requirements.txt/Pipfile/pyproject.toml/setup.cfg against the library lists below, and gates the access-control checks (missing_auth_middleware, idor_heuristic, admin_role_check) on that result — silent for public APIs/internal tools that don't use auth, active for anything that pulls in an auth library. Set to true/false to override detection manually. The password/JWT/session hygiene checks below (weak_password_hashing, jwt_missing_expiration, session_cookie_flags) are self-scoped — they only fire on unambiguous password-hashing/JWT-signing/session-config syntax — and always run regardless of this setting.",
+    "checks": {
+      "missing_auth_middleware": true,
+      "idor_heuristic": true,
+      "admin_role_check": true,
+      "weak_password_hashing": true,
+      "jwt_missing_expiration": true,
+      "session_cookie_flags": true
+    },
+    "libraries": {
+      "npm": ["passport", "next-auth", "auth0", "@okta/okta-sdk-nodejs", "firebase-admin", "jsonwebtoken", "express-session", "cookie-session", "@clerk/nextjs", "@clerk/clerk-sdk-node", "supertokens-node", "keycloak-connect", "openid-client", "oidc-client-ts"],
+      "pypi": ["django-allauth", "django-oauth-toolkit", "social-auth-app-django", "flask-login", "flask-jwt-extended", "flask-security", "flask-security-too", "authlib", "python-jose", "pyjwt", "djangorestframework-simplejwt", "fastapi-users", "fastapi-login", "supertokens-python", "auth0-python", "python-keycloak", "firebase-admin"]
+    }
   },
   "security_relevant": {
     "always_analyze": true,

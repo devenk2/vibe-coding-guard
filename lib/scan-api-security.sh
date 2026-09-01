@@ -8,6 +8,10 @@
 # Outputs JSON findings (one per line) to stdout
 scan_api_security_file() {
   local file="$1"
+  # auth_detected: precomputed by the hook via project_uses_auth() — gates the
+  # missing-api-auth checks below so they stay silent on projects that don't
+  # use/need auth (public APIs, internal tools). See lib/scan-auth.sh.
+  local auth_detected="${2:-false}"
 
   # =====================================================================
   # === HIGH SEVERITY ===
@@ -65,10 +69,19 @@ scan_api_security_file() {
 
   # FastAPI route without Depends() for auth — POST/PUT/PATCH/DELETE
   # Heuristic: route decorator present but no Depends() in the function signature
+  # Gated: only meaningful if the project actually uses auth (see scan-auth.sh
+  # header for the rationale — this avoids noise on public APIs/internal tools
+  # that intentionally have no auth model).
+  if [[ "$auth_detected" == "true" && "${AUTH_CHECK_MISSING_MIDDLEWARE:-true}" == "true" ]]; then
   if grep -qE '@(app|router)\.(post|put|patch|delete)\b' "$file" 2>/dev/null; then
+    # NOTE: declared once, outside the loop — bash 3.2 (this project's target
+    # shell) has a bug where re-declaring `local` with a multi-line
+    # command-substitution value on every loop iteration can leak a stray
+    # "func_sig=$'...'" line onto stdout starting from the 2nd match. See
+    # lib/scan-auth.sh's header comment for the full writeup.
+    local func_sig
     while IFS=: read -r line_num _; do
       # Read the next few lines to check for Depends in the function signature
-      local func_sig
       func_sig=$(sed -n "${line_num},$((line_num + 5))p" "$file" 2>/dev/null)
       if ! echo "$func_sig" | grep -qEi '(Depends|Security|HTTPBearer|HTTPBasic|OAuth2PasswordBearer|api_key|get_current_user|authenticate|require_auth|login_required|permission_required)'; then
         emit_finding "MEDIUM" "PW.9" "PW" "missing-api-auth" \
@@ -94,6 +107,7 @@ scan_api_security_file() {
         fi
       done < <(grep -nE '\.(post|put|patch|delete)\s*\(' "$file" 2>/dev/null | grep -vE '^\s*(//|\*)|@(app|router)\.' || true)
     fi
+  fi
   fi
 
   # --- API Key / Token in URL Query Parameters ---

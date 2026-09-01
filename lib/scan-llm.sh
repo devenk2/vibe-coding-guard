@@ -167,8 +167,13 @@ scan_llm_file() {
   # --- LLM10: Unbounded consumption — LLM call with no token/timeout limit ---
   # Windowed per-call check (the call may span several lines).
   if [[ "$has_llm_call" == true ]]; then
+    # NOTE: declared once, outside the loop — bash 3.2 (this project's target
+    # shell) has a bug where re-declaring `local` with a multi-line
+    # command-substitution value on every loop iteration can leak a stray
+    # "window=$'...'" line onto stdout starting from the 2nd LLM call in a
+    # file. See lib/scan-auth.sh's header comment for the full writeup.
+    local window
     while IFS=: read -r line_num _; do
-      local window
       window=$(sed -n "${line_num},$((line_num + 6))p" "$file" 2>/dev/null)
       # Skip if a token/timeout limit is set anywhere in the call window.
       if echo "$window" | grep -qEi '(max_tokens|max_completion_tokens|max_output_tokens|maxTokens|maxOutputTokens|timeout|request_timeout)'; then

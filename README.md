@@ -228,6 +228,29 @@ Edit `~/.vibe-coding-guard/config.json` to set defaults for all projects:
 - **llm_analysis.max_context_lines** — Lines of code to include in analysis prompt
 - **llm_analysis.timeout_seconds** — Max time for LLM analysis
 
+## Suppressing False Positives
+
+Regex scanning is not AST-aware, so some findings will be false positives in
+context (e.g. a token/timeout limit set via a wrapper function the windowed
+heuristic can't see). Rather than disabling a whole check project-wide, add an
+inline `vcg-ignore` marker as a comment on the flagged line (or the line
+directly above it). It works with any comment syntax (`#`, `//`, `--`, ...)
+since it's matched as plain text:
+
+```python
+return client.chat.completions.create(  # vcg-ignore: missing-llm-limits
+    model="gpt-4",
+    messages=[{"role": "user", "content": prompt}],
+)
+```
+
+A bare `vcg-ignore` (no category) suppresses every finding on that line.
+`vcg-ignore: category-a,category-b` scopes it to specific finding categories —
+the `category` field in a finding's JSON output (e.g. `missing-llm-limits`,
+`hardcoded-secret`) — so other checks on the same line stay active. Suppressed
+findings never reach the regex output, so they also don't trigger hybrid
+mode's contextual-analysis request.
+
 ## Running Tests
 
 ```bash

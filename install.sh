@@ -258,11 +258,13 @@ else
 fi
 
 # --- Step 2d: Install rules ---
+RULE_COUNT=0
 for rule_file in "$VCG_INSTALL_DIR/rules/"*.md; do
   rule_name=$(basename "$rule_file")
   cp "$rule_file" "$TARGET_PROJECT/.claude/rules/$rule_name"
+  RULE_COUNT=$((RULE_COUNT + 1))
 done
-print_success "Installed SSDF security rules to .claude/rules/"
+print_success "Installed $RULE_COUNT SSDF security rule file(s) to .claude/rules/"
 
 # --- Summary ---
 echo ""
@@ -277,7 +279,7 @@ echo "  Files modified:"
 echo "    - $SETTINGS_FILE"
 echo "    - $PROJECT_CONFIG"
 echo "    - $CLAUDE_MD"
-echo "    - $TARGET_PROJECT/.claude/rules/ (4 rule files)"
+echo "    - $TARGET_PROJECT/.claude/rules/ ($RULE_COUNT rule files)"
 echo ""
 echo "  Configuration:"
 echo "    - Global config:  $VCG_INSTALL_DIR/config.json"
