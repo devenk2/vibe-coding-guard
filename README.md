@@ -194,6 +194,34 @@ Edit `.claude/vibe-coding-guard.json` in your project to customize settings for 
 
 Project settings **override** global settings. Arrays like `ignore_paths` and `custom_secret_patterns` are **merged** (project paths are added to global paths).
 
+#### Acknowledging an intentional tradeoff (`_vcg_acknowledged`)
+
+`.claude/vibe-coding-guard.json` is scanned specially: settings that reduce
+coverage (`analysis_mode: "fast"`, `auth_scanning.enabled: false`,
+`dependency_scanning.enabled: false`, `llm_analysis.enabled: false`,
+`security_relevant.always_analyze: false`, a lowered `blocking_severity`, or
+any `ignore_paths` entry) always produce a finding the first time they're
+set — even in `fast` mode, which has no LLM step to catch it contextually.
+This isn't a judgment that the setting is wrong; several of these are
+legitimate, documented tradeoffs (fast mode is meant for CI/low-latency/
+cost-sensitive use). The finding just makes sure the tradeoff is seen once.
+
+Since this file is JSON (no comment syntax, so the usual `vcg-ignore`
+escape hatch doesn't apply), add the setting's key to `_vcg_acknowledged`
+once you've deliberately made the choice, and it stops re-flagging:
+
+```json
+{
+  "analysis_mode": "fast",
+  "_vcg_acknowledged": ["analysis_mode"]
+}
+```
+
+Each key is acknowledged independently — acknowledging `analysis_mode`
+doesn't silence a later, separate decision to also turn off
+`auth_scanning.enabled`. This only applies to the project-local override,
+not the global install config.
+
 ### Global Configuration
 
 Edit `~/.vibe-coding-guard/config.json` to set defaults for all projects:

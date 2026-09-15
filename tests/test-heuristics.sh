@@ -63,6 +63,98 @@ is_security_relevant_file "/proj/app/auth/jwt.py";  assert_rc "auth path is secu
 is_security_relevant_file "/proj/rankings.py";      assert_rc "rankings.py is NOT security-relevant" 1 $?
 
 echo ""
+echo "--- is_vcg_config_file / is_security_relevant_file override-proofing ---"
+is_vcg_config_file "/proj/.claude/vibe-coding-guard.json"; assert_rc "project-local vcg config is recognized" 0 $?
+is_vcg_config_file "$VCG_HOME/config.json";                assert_rc "global install config is OUT of scope (not agent-writable mid-session)" 1 $?
+is_vcg_config_file "/proj/other.json";                     assert_rc "unrelated json is NOT recognized" 1 $?
+# Even with SECURITY_RELEVANT_PATTERNS overridden to something that would
+# never match the vcg config path, it must still be treated as relevant —
+# this is the exact bypass a hostile project config could otherwise use.
+SECURITY_RELEVANT_PATTERNS=$'zzz-nonmatching-pattern'
+is_security_relevant_file "/proj/.claude/vibe-coding-guard.json"
+assert_rc "vcg config stays security-relevant even if patterns list is hostile" 0 $?
+load_config ""
+
+echo ""
+echo "--- scan_vcg_config_file: weakening detection ---"
+printf '{"analysis_mode": "fast"}\n' > "$WORK/weak1.json"
+n=$(scan_vcg_config_file "$WORK/weak1.json" | wc -l | tr -d ' ')
+[[ "$n" -ge 1 ]] && ok "analysis_mode=fast is flagged" || bad "analysis_mode=fast NOT flagged"
+
+printf '{"auth_scanning": {"enabled": false}}\n' > "$WORK/weak2.json"
+n=$(scan_vcg_config_file "$WORK/weak2.json" | wc -l | tr -d ' ')
+[[ "$n" -ge 1 ]] && ok "auth_scanning.enabled=false is flagged" || bad "auth_scanning.enabled=false NOT flagged"
+
+printf '{"blocking_severity": "LOW"}\n' > "$WORK/weak3.json"
+n=$(scan_vcg_config_file "$WORK/weak3.json" | wc -l | tr -d ' ')
+[[ "$n" -ge 1 ]] && ok "blocking_severity=LOW is flagged" || bad "blocking_severity=LOW NOT flagged"
+
+printf '{"version": "1.0.0", "blocking_severity": "MEDIUM"}\n' > "$WORK/clean.json"
+n=$(scan_vcg_config_file "$WORK/clean.json" | wc -l | tr -d ' ')
+[[ "$n" -eq 0 ]] && ok "unmodified-looking config produces no findings" || bad "clean config flagged ($n findings)"
+
+mkdir -p "$WORK/.claude"
+printf '{"ignore_paths": [".claude", "src"]}\n' > "$WORK/.claude/vibe-coding-guard.json"
+n=$(scan_vcg_config_file "$WORK/.claude/vibe-coding-guard.json" | wc -l | tr -d ' ')
+[[ "$n" -ge 1 ]] && ok "project-local ignore_paths addition is flagged" || bad "ignore_paths addition NOT flagged"
+
+# Inverted-logic regression: false on these two keys means MORE scanning,
+# not less — must never be flagged as "weakened".
+printf '{"doc_scanning": {"secrets_only": false}}\n' > "$WORK/hardened1.json"
+n=$(scan_vcg_config_file "$WORK/hardened1.json" | wc -l | tr -d ' ')
+[[ "$n" -eq 0 ]] && ok "doc_scanning.secrets_only=false (more scanning) is NOT flagged" || bad "doc_scanning.secrets_only=false wrongly flagged ($n findings)"
+
+printf '{"test_scanning": {"skip_tests": false}}\n' > "$WORK/hardened2.json"
+n=$(scan_vcg_config_file "$WORK/hardened2.json" | wc -l | tr -d ' ')
+[[ "$n" -eq 0 ]] && ok "test_scanning.skip_tests=false (more scanning) is NOT flagged" || bad "test_scanning.skip_tests=false wrongly flagged ($n findings)"
+
+echo ""
+echo "--- scan_vcg_config_file: _vcg_acknowledged suppression ---"
+printf '{"analysis_mode": "fast", "_vcg_acknowledged": ["analysis_mode"]}\n' > "$WORK/acked1.json"
+n=$(scan_vcg_config_file "$WORK/acked1.json" | wc -l | tr -d ' ')
+[[ "$n" -eq 0 ]] && ok "acknowledged analysis_mode=fast produces no finding" || bad "acknowledged analysis_mode=fast still flagged ($n findings)"
+
+printf '{"analysis_mode": "fast", "auth_scanning": {"enabled": false}, "_vcg_acknowledged": ["analysis_mode"]}\n' > "$WORK/acked2.json"
+n=$(scan_vcg_config_file "$WORK/acked2.json" | wc -l | tr -d ' ')
+[[ "$n" -eq 1 ]] && ok "acknowledging one key leaves an unacknowledged key still flagged" || bad "expected exactly 1 finding, got $n"
+
+printf '{"analysis_mode": "fast", "auth_scanning": {"enabled": false}, "_vcg_acknowledged": ["analysis_mode", "auth_scanning.enabled"]}\n' > "$WORK/acked3.json"
+n=$(scan_vcg_config_file "$WORK/acked3.json" | wc -l | tr -d ' ')
+[[ "$n" -eq 0 ]] && ok "acknowledging both keys independently silences both" || bad "expected 0 findings, got $n"
+
+echo ""
+echo "--- end-to-end: vcg config bypass attempts are still scanned ---"
+mkdir -p "$WORK/proj2/.claude"
+run_hook_cwd() { # file_path cwd  → prints EXIT code
+  jq -n --arg fp "$1" --arg cwd "$2" \
+    '{tool_name:"Write", tool_input:{file_path:$fp}, tool_response:{success:true}, session_id:"h", cwd:$cwd}' \
+    | bash "$HOOK" >/dev/null 2>/dev/null; echo $?
+}
+# Even in `fast` mode (no LLM calls at all), a weakening edit to the vcg
+# config itself must still produce a regex-level finding (exit 2).
+printf '{"analysis_mode": "fast", "auth_scanning": {"enabled": false}}\n' > "$WORK/proj2/.claude/vibe-coding-guard.json"
+rc=$(run_hook_cwd "$WORK/proj2/.claude/vibe-coding-guard.json" "$WORK/proj2")
+assert_rc "weakened vcg config is flagged even under its own fast mode" 2 "$rc"
+
+# analysis_mode=fast alone (a legitimate, documented tradeoff) must still
+# surface once, unacknowledged — then go quiet once acknowledged, with no
+# LLM fallback to catch it since fast mode has no LLM step at all.
+printf '{"analysis_mode": "fast"}\n' > "$WORK/proj2/.claude/vibe-coding-guard.json"
+rc=$(run_hook_cwd "$WORK/proj2/.claude/vibe-coding-guard.json" "$WORK/proj2")
+assert_rc "unacknowledged analysis_mode=fast alone still surfaces (exit 2)" 2 "$rc"
+
+printf '{"analysis_mode": "fast", "_vcg_acknowledged": ["analysis_mode"]}\n' > "$WORK/proj2/.claude/vibe-coding-guard.json"
+rc=$(run_hook_cwd "$WORK/proj2/.claude/vibe-coding-guard.json" "$WORK/proj2")
+assert_rc "acknowledged analysis_mode=fast alone is silent (exit 0)" 0 "$rc"
+
+# The global install config must NOT get vcg-config treatment at all.
+printf '{"analysis_mode": "fast", "auth_scanning": {"enabled": false}}\n' > "$WORK/global_config_copy.json"
+cp "$WORK/global_config_copy.json" "$VCG_HOME/config.json"
+rc=$(run_hook_cwd "$VCG_HOME/config.json" "$WORK/proj2")
+assert_rc "global install config write is NOT scanned as vcg config (exit 0)" 0 "$rc"
+cp "$PROJECT_DIR/config.json" "$VCG_HOME/config.json"
+
+echo ""
 echo "--- secret precision (scan_secrets_file) ---"
 # Empty RHS in a real .env must NOT flag
 printf 'OPENAI_API_KEY=\nDB_PASSWORD=""\n' > "$WORK/.env"

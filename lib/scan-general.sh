@@ -205,3 +205,108 @@ scan_general_file() {
 
   return 0
 }
+
+# Check whether a given setting key has been acknowledged via the reserved
+# "_vcg_acknowledged" array in the vcg config file itself (a JSON array of
+# setting-key strings, e.g. ["analysis_mode", "auth_scanning.enabled"]). Some
+# of the settings scan_vcg_config_file checks (analysis_mode=fast, auth/dep
+# scanning turned off, ...) are legitimate, documented, first-class choices —
+# not inherently suspicious on their own — so nagging on every future edit to
+# the file once a human has knowingly made that choice would just be noise.
+# The finding still fires the first time (so the tradeoff is seen and
+# understood), and stays silent for that specific key once acknowledged.
+# Usage: _vcg_setting_acknowledged "$acked_csv" "analysis_mode" → 0 if listed
+_vcg_setting_acknowledged() {
+  local acked_csv="$1"
+  local key="$2"
+  [[ -z "$acked_csv" ]] && return 1
+  local IFS=','
+  local k
+  for k in $acked_csv; do
+    [[ "$k" == "$key" ]] && return 0
+  done
+  return 1
+}
+
+# Scan Vibe Coding Guard's own project-local config override
+# (.claude/vibe-coding-guard.json) for settings that weaken or disable
+# security scanning. Runs unconditionally — including in `fast` mode, via
+# is_vcg_config_file's dispatch in post-tool-use.sh — because a config edit
+# that disables checks (e.g. auth_scanning.enabled=false) would otherwise
+# never itself produce a finding capable of flagging its own effect.
+# Outputs JSON findings (one per line) to stdout
+scan_vcg_config_file() {
+  local file="$1"
+
+  # A malformed/non-JSON write to this path isn't this scanner's concern.
+  jq -e . "$file" >/dev/null 2>&1 || return 0
+
+  local val acked
+  acked=$(jq -r '(._vcg_acknowledged // []) | join(",")' "$file" 2>/dev/null)
+
+  val=$(jq -r '.analysis_mode // empty' "$file" 2>/dev/null)
+  if [[ "$val" == "fast" ]] && ! _vcg_setting_acknowledged "$acked" "analysis_mode"; then
+    emit_finding "MEDIUM" "PW.9" "PW" "vcg-config-weakened" \
+      "$file" "1" "analysis_mode: fast" \
+      "Vibe Coding Guard's config sets analysis_mode to 'fast', disabling all LLM-based contextual security analysis for this project" \
+      "fast mode is a legitimate, documented tradeoff (regex-only, no LLM cost) — if this was an intentional choice, add \"_vcg_acknowledged\": [\"analysis_mode\"] to silence this going forward. If it wasn't, an injected instruction may have talked the agent into it to evade review"
+  fi
+
+  val=$(jq -r '.blocking_severity // empty' "$file" 2>/dev/null)
+  case "$val" in
+    [Ll][Oo][Ww]|[Nn][Oo][Nn][Ee])
+      if ! _vcg_setting_acknowledged "$acked" "blocking_severity"; then
+        emit_finding "MEDIUM" "PW.9" "PW" "vcg-config-weakened" \
+          "$file" "1" "blocking_severity: $val" \
+          "Vibe Coding Guard's blocking_severity was lowered to '$val', letting more severe findings through without blocking" \
+          "If intentional, add \"_vcg_acknowledged\": [\"blocking_severity\"] to silence this going forward"
+      fi
+      ;;
+  esac
+
+  # Explicit `== false` checks, no `// empty`: jq's `//` treats a real `false`
+  # the same as null, which would silently swallow exactly the value we're
+  # looking for (the same footgun documented in load_config above). Only
+  # keys where `false` unambiguously means "less scanning" belong here —
+  # doc_scanning.secrets_only and test_scanning.skip_tests are deliberately
+  # excluded: `false` on either means *more* scanning, not less.
+  local key
+  for key in llm_analysis.enabled dependency_scanning.enabled security_relevant.always_analyze; do
+    val=$(jq -r "if .${key} == false then \"false\" else empty end" "$file" 2>/dev/null)
+    if [[ "$val" == "false" ]] && ! _vcg_setting_acknowledged "$acked" "$key"; then
+      emit_finding "HIGH" "PW.9" "PW" "vcg-config-weakened" \
+        "$file" "1" "$key: false" \
+        "Vibe Coding Guard security check '$key' was disabled in config" \
+        "If intentional, add \"_vcg_acknowledged\": [\"$key\"] to silence this going forward — disabling a security check silently reduces scan coverage otherwise"
+    fi
+  done
+
+  # auth_scanning.enabled accepts either a native boolean or the string enum
+  # "auto"/"true"/"false" (see common.sh's load_config) — check both forms.
+  val=$(jq -r 'if .auth_scanning.enabled == false or .auth_scanning.enabled == "false" then "false" else empty end' "$file" 2>/dev/null)
+  if [[ "$val" == "false" ]] && ! _vcg_setting_acknowledged "$acked" "auth_scanning.enabled"; then
+    emit_finding "HIGH" "PW.9" "PW" "vcg-config-weakened" \
+      "$file" "1" "auth_scanning.enabled: false" \
+      "Vibe Coding Guard security check 'auth_scanning.enabled' was disabled in config" \
+      "If intentional (e.g. this project genuinely has no auth), add \"_vcg_acknowledged\": [\"auth_scanning.enabled\"] to silence this going forward"
+  fi
+
+  # ignore_paths is empty by default on the project-local override (paths
+  # merge on top of the global defaults), so any entry here is a deliberate
+  # addition — and each entry is a directory/file the scanner will never
+  # look at again. This is the sharpest bypass, so it's still flagged in
+  # full even when acknowledged for other keys; only "ignore_paths" itself
+  # in _vcg_acknowledged silences it.
+  if ! _vcg_setting_acknowledged "$acked" "ignore_paths"; then
+    local ignore_count
+    ignore_count=$(jq -r '(.ignore_paths // []) | length' "$file" 2>/dev/null || echo 0)
+    if [[ "$ignore_count" -gt 0 ]]; then
+      emit_finding "HIGH" "PW.9" "PW" "vcg-config-weakened" \
+        "$file" "1" "ignore_paths has $ignore_count entries" \
+        "This project's Vibe Coding Guard override adds $ignore_count path(s) to ignore_paths — every matching file or directory becomes fully exempt from scanning" \
+        "Review each entry with a human before accepting; an injected instruction could add a path specifically to hide malicious code from the scanner. If reviewed and intentional, add \"_vcg_acknowledged\": [\"ignore_paths\"] to silence this going forward"
+    fi
+  fi
+
+  return 0
+}

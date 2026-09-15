@@ -71,8 +71,19 @@ PROJECT_DIR="$(echo "$INPUT" | jq -r '.cwd // empty')"
 # Load configuration (with project-local overrides if available)
 load_config "$PROJECT_DIR"
 
+# Vibe Coding Guard's own config file is exempt from the ignore_paths and
+# test-file skips below: both of those lists are themselves read out of this
+# file (or, for ignore_paths, merged from it), so a single malicious edit
+# could otherwise add ".claude" to ignore_paths — or rename itself to match a
+# test pattern — to hide the very edit that weakened the guard from ever
+# being scanned.
+IS_VCG_CONFIG="false"
+if is_vcg_config_file "$FILE_PATH"; then
+  IS_VCG_CONFIG="true"
+fi
+
 # Check if path should be ignored
-if should_ignore_path "$FILE_PATH"; then
+if [[ "$IS_VCG_CONFIG" == "false" ]] && should_ignore_path "$FILE_PATH"; then
   log_debug "Ignoring path: $FILE_PATH"
   exit 0
 fi
@@ -87,7 +98,7 @@ fi
 # Skip test files entirely. Test fixtures are dominated by fake sentinels,
 # dummy credentials, and negative-test URLs — scanning them is almost pure
 # noise. Disable via test_scanning.skip_tests=false in config.
-if [[ "${SKIP_TEST_FILES:-true}" == "true" ]] && is_test_file "$FILE_PATH"; then
+if [[ "$IS_VCG_CONFIG" == "false" && "${SKIP_TEST_FILES:-true}" == "true" ]] && is_test_file "$FILE_PATH"; then
   log_debug "Skipping test file: $FILE_PATH"
   exit 0
 fi
@@ -145,6 +156,14 @@ case "$EXT" in
     scan_api_security_file "$FILE_PATH" "$AUTH_PROJECT_DETECTED" >> "$FINDINGS_FILE"
     ;;
 esac
+fi
+
+# Vibe Coding Guard's own config file gets a dedicated, deterministic scan for
+# settings that weaken or disable coverage — always, even in `fast` mode,
+# since this is exactly the file a config-weakening edit would otherwise hide
+# inside without ever tripping a finding.
+if [[ "$IS_VCG_CONFIG" == "true" ]]; then
+  scan_vcg_config_file "$FILE_PATH" >> "$FINDINGS_FILE"
 fi
 
 # Audit .gitignore if that's the file being written/edited

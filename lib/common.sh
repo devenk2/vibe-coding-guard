@@ -48,7 +48,7 @@ load_config() {
   DOC_SECRETS_ONLY="true"
   DOC_EXTENSIONS=$'.md\n.markdown\n.mdx\n.rst\n.txt'
   # Test files: skipped by default. Test fixtures are full of fake sentinels,
-  # negative-test http:// URLs, and dummy credentials that produce pure noise.
+  # negative-test http:// URLs, and dummy credentials that produce pure noise.  # vcg-ignore: insecure-transport (prose describing test fixture content, not a network call)
   SKIP_TEST_FILES="true"
   TEST_FILE_PATTERNS=$'test_*\n*_test.*\n*.test.*\n*.spec.*\n*_spec.*\n/tests/\n/test/\n/__tests__/\n/spec/'
   # Security-relevant files: always get contextual analysis in hybrid mode,
@@ -390,6 +390,22 @@ is_test_file() {
   return 1
 }
 
+# Check whether a file IS Vibe Coding Guard's own project-local config
+# override (<project>/.claude/vibe-coding-guard.json). Deliberately NOT
+# driven by the user-configurable SECURITY_RELEVANT_PATTERNS/ignore_paths/
+# test_patterns lists: an attacker who can write this exact file could
+# otherwise edit one of those very lists to exempt itself, self-neutering the
+# guard with no trace and no finding ever generated for the edit that caused
+# it. Scoped to the project-local override only, not the global install
+# config ($VCG_HOME/config.json) — that file isn't reachable by an in-session
+# coding agent under prompt injection; it's normally hand-edited by whoever
+# ran install.sh.
+# Usage: is_vcg_config_file "/proj/.claude/vibe-coding-guard.json" → 0 if so
+is_vcg_config_file() {
+  local filepath="$1"
+  [[ "$filepath" == */.claude/vibe-coding-guard.json ]]
+}
+
 # Check if a file is security-relevant by name/path (config, secrets, auth,
 # crypto, logging, ...). These modules rarely resemble a request→sink handler,
 # so the hybrid token heuristic misses them even though they are exactly where
@@ -397,6 +413,7 @@ is_test_file() {
 # Usage: is_security_relevant_file "/a/b/config.py"  → returns 0 if relevant
 is_security_relevant_file() {
   local filepath="$1"
+  is_vcg_config_file "$filepath" && return 0
   [[ -z "${SECURITY_RELEVANT_PATTERNS:-}" ]] && return 1
   local lower
   lower=$(printf '%s' "$filepath" | tr '[:upper:]' '[:lower:]')
