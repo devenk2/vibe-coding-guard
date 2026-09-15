@@ -1,5 +1,7 @@
 # Vibe Coding Guard
 
+*A personal project, early and rough in places.*
+
 A security subagent for Claude Code that automatically scans code for vulnerabilities, mapped to the NIST Secure Software Development Framework (SSDF).
 
 ## What It Does
@@ -20,7 +22,7 @@ Vibe Coding Guard hooks into Claude Code's tool system to provide real-time secu
 ### Install
 
 ```bash
-git clone https://github.com/your-username/Vibe-Coding-Guard.git
+git clone https://github.com/devenk2/Vibe-Coding-Guard.git
 cd Vibe-Coding-Guard
 ./install.sh /path/to/your/project
 ```

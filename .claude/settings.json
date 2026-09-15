@@ -6,7 +6,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "/Users/devenkumar/.vibe-coding-guard/hooks/pre-tool-use.sh",
+            "command": "$HOME/.vibe-coding-guard/hooks/pre-tool-use.sh",
             "timeout": 10
           }
         ]
@@ -18,7 +18,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "/Users/devenkumar/.vibe-coding-guard/hooks/post-tool-use.sh",
+            "command": "$HOME/.vibe-coding-guard/hooks/post-tool-use.sh",
             "timeout": 15
           }
         ]
