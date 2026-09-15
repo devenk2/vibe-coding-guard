@@ -1,6 +1,6 @@
 # Vibe Coding Guard
 
-*A personal project, early and rough in places.*
+*A personal project, always a work in progress.*
 
 A security subagent for Claude Code that automatically scans code for vulnerabilities, mapped to the NIST Secure Software Development Framework (SSDF).
 
